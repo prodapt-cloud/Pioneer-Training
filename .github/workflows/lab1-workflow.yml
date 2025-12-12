@@ -133,16 +133,18 @@ jobs:
           echo "=== Pod Logs ==="
           kubectl logs -l app=llmops-api --tail=100 || true
 
-      # 8. Port-forward for testing
+      # 11. Port-forward for testing
       - name: Expose service
         run: |
           kubectl port-forward svc/llmops-service 8080:80 --address 0.0.0.0 &
+          sleep 5
           echo "API running at http://localhost:8080"
 
-      # 9. Run integration tests
+      # 12. Run integration tests
       - name: Test endpoint
         run: |
           pip install requests pytest
+          cd llmops/Lab1-LLMOps-Pipeline
           pytest tests/test_api.py -v
 
       # 10. Optional: Deploy to Oracle Cloud Free Tier OKE (uncomment if you have OCI)

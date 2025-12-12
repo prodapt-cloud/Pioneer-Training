@@ -43,9 +43,13 @@ spec:
               key: AZURE_OPENAI_ENDPOINT
               optional: true
         - name: AZURE_OPENAI_API_VERSION
-          value: "2024-02-15-preview"
+          value: "2025-01-01-preview"
         - name: AZURE_OPENAI_DEPLOYMENT_NAME
-          value: "gpt-4o-mini"
+          value: "gpt-4.1-mini"
+        - name: MLFLOW_TRACKING_URI
+          value: "http://34.71.60.197:5000"
+        - name: MLFLOW_ENABLED
+          value: "true"
         - name: GROQ_API_KEY
           valueFrom:
             secretKeyRef:
