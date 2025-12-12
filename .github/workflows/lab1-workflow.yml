@@ -57,8 +57,19 @@ jobs:
       # 7. Substitute variables in deployment.yaml
       - name: Prepare Kubernetes manifests
         run: |
-          sed -i "s|\${{ github.repository }}|${{ env.REPO_LOWER }}|g" llmops/Lab1-LLMOps-Pipeline/k8s/deployment.yaml
+          # Install yq for YAML manipulation
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          
+          # Update the image name using yq
+          export IMAGE_NAME="ghcr.io/${{ env.REPO_LOWER }}/llmops-api:latest"
+          yq eval ".spec.template.spec.containers[0].image = \"${IMAGE_NAME}\"" -i llmops/Lab1-LLMOps-Pipeline/k8s/deployment.yaml
+          
+          echo "=== Updated deployment.yaml ==="
           cat llmops/Lab1-LLMOps-Pipeline/k8s/deployment.yaml
+          echo ""
+          echo "=== Verifying image name ==="
+          yq eval '.spec.template.spec.containers[0].image' llmops/Lab1-LLMOps-Pipeline/k8s/deployment.yaml
 
       # 8. Create image pull secret for GHCR
       - name: Create image pull secret
