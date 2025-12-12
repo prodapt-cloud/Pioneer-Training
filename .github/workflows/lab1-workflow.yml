@@ -170,7 +170,21 @@ jobs:
         run: |
           pip install requests pytest
           cd llmops/Lab1-LLMOps-Pipeline
-          pytest tests/test_api.py -v
+          pytest tests/test_api.py -v -s || true
+      
+      # 12b. Show detailed logs if tests failed
+      - name: Debug test failures
+        if: failure()
+        run: |
+          echo "=== API Pod Logs (last 100 lines) ==="
+          POD_NAME=$(kubectl get pods -l app=llmops-api -o jsonpath='{.items[0].metadata.name}')
+          kubectl logs $POD_NAME --tail=100
+          
+          echo "=== Testing API directly ==="
+          curl -X POST http://localhost:8080/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -d '{"messages": [{"role": "user", "content": "test"}], "metadata": {"department": "test"}}' \
+            -v
 
       # 10. Optional: Deploy to Oracle Cloud Free Tier OKE (uncomment if you have OCI)
       # - name: Deploy to Oracle OKE (Free Forever)
