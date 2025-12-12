@@ -57,7 +57,7 @@ jobs:
       # 7. Deploy to Kind (real K8s, no cloud cost)
       - name: Deploy to Kubernetes
         run: |
-          kubectl apply -f k8s/
+          kubectl apply -f llmops/Lab1-LLMOps-Pipeline/k8s/
           kubectl rollout status deployment/llmops-api -n default --timeout=180s
 
       # 8. Port-forward for testing
