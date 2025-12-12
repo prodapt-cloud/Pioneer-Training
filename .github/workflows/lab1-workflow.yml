@@ -167,24 +167,37 @@ jobs:
 
       # 12. Run integration tests
       - name: Test endpoint
+        id: run_tests
+        continue-on-error: true
         run: |
           pip install requests pytest
           cd llmops/Lab1-LLMOps-Pipeline
-          pytest tests/test_api.py -v -s || true
+          pytest tests/test_api.py -v -s
       
-      # 12b. Show detailed logs if tests failed
-      - name: Debug test failures
-        if: failure()
+      # 12b. Always show detailed logs for debugging
+      - name: Show API logs and debug info
+        if: always()
         run: |
           echo "=== API Pod Logs (last 100 lines) ==="
           POD_NAME=$(kubectl get pods -l app=llmops-api -o jsonpath='{.items[0].metadata.name}')
           kubectl logs $POD_NAME --tail=100
           
+          echo ""
           echo "=== Testing API directly ==="
           curl -X POST http://localhost:8080/v1/chat/completions \
             -H "Content-Type: application/json" \
             -d '{"messages": [{"role": "user", "content": "test"}], "metadata": {"department": "test"}}' \
-            -v
+            -v || true
+          
+          echo ""
+          echo "=== Pod Environment Check ==="
+          kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_KEY length: ${#AZURE_OPENAI_KEY}"'
+          kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_ENDPOINT: $AZURE_OPENAI_ENDPOINT"'
+      
+      # 12c. Fail the workflow if tests failed
+      - name: Check test results
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1
 
       # 10. Optional: Deploy to Oracle Cloud Free Tier OKE (uncomment if you have OCI)
       # - name: Deploy to Oracle OKE (Free Forever)
