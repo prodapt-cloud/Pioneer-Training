@@ -13,11 +13,33 @@ spec:
       labels:
         app: llmops-api
     spec:
+      imagePullSecrets:
+      - name: ghcr-secret
       containers:
       - name: llmops
         image: ghcr.io/${{ github.repository }}/llmops-api:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 8000
+        env:
+        - name: PORT
+          value: "8000"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
         resources:
           limits:
             cpu: "2"

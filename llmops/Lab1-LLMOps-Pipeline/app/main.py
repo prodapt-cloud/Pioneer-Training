@@ -13,8 +13,8 @@ import redis
 import mlflow
 
 # === CONFIG ===
-r = redis.Redis(host=os.getenv("REDIS_HOST", "localhost"), port=6379, db=0, decode_responses=True)
-PROMPT_PATH = "/app/prompts/assistant_v1.jinja2"
+r = redis.Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, db=0, decode_responses=True)
+PROMPT_PATH = "/app/prompt/assistant_v1.jinja2"
 
 # Load prompt template
 with open(PROMPT_PATH) as f:
@@ -35,6 +35,25 @@ class ChatCompletionRequest(BaseModel):
 def get_cache_key(messages: List[Dict], department: str) -> str:
     content = json.dumps(messages) + department
     return "cache:" + hashlib.sha256(content.encode()).hexdigest()
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Kubernetes probes"""
+    try:
+        # Check Redis connection
+        r.ping()
+        return {"status": "healthy", "redis": "connected"}
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "error": str(e)}
+        )
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {"message": "LLMOps Production API", "version": "1.0.0"}
+
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):

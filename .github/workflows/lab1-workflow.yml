@@ -54,11 +54,46 @@ jobs:
           cluster_name: llmops-cluster
           version: v0.23.0
 
-      # 7. Deploy to Kind (real K8s, no cloud cost)
+      # 7. Substitute variables in deployment.yaml
+      - name: Prepare Kubernetes manifests
+        run: |
+          sed -i "s|\${{ github.repository }}|${{ env.REPO_LOWER }}|g" llmops/Lab1-LLMOps-Pipeline/k8s/deployment.yaml
+          cat llmops/Lab1-LLMOps-Pipeline/k8s/deployment.yaml
+
+      # 8. Create image pull secret for GHCR
+      - name: Create image pull secret
+        run: |
+          kubectl create secret docker-registry ghcr-secret \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GITHUB_TOKEN }} \
+            --docker-email=${{ github.actor }}@users.noreply.github.com || true
+
+      # 9. Deploy Redis first
+      - name: Deploy Redis
+        run: |
+          kubectl apply -f llmops/Lab1-LLMOps-Pipeline/k8s/redis.yaml
+          kubectl rollout status deployment/redis -n default --timeout=120s
+          echo "Redis is ready"
+
+      # 10. Deploy API to Kind (real K8s, no cloud cost)
       - name: Deploy to Kubernetes
         run: |
-          kubectl apply -f llmops/Lab1-LLMOps-Pipeline/k8s/
-          kubectl rollout status deployment/llmops-api -n default --timeout=180s
+          kubectl apply -f llmops/Lab1-LLMOps-Pipeline/k8s/deployment.yaml
+          kubectl rollout status deployment/llmops-api -n default --timeout=300s
+      
+      # 9. Debug deployment if it fails
+      - name: Debug deployment on failure
+        if: failure()
+        run: |
+          echo "=== Deployment Status ==="
+          kubectl get deployments
+          echo "=== Pod Status ==="
+          kubectl get pods -o wide
+          echo "=== Pod Descriptions ==="
+          kubectl describe pods -l app=llmops-api
+          echo "=== Pod Logs ==="
+          kubectl logs -l app=llmops-api --tail=100 || true
 
       # 8. Port-forward for testing
       - name: Expose service
