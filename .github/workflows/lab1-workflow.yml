@@ -3,9 +3,13 @@ name: Deploy LLMOps Endpoint (100% Free)
 
 on:
   push:
-    branches: [ main ]
+    branches: [ lab1 ]
   workflow_dispatch:
-
+    inputs:
+        workflow-path:
+          description: 'Path to the workflow file'
+          required: true
+          default: '.github\workflows\lab1-workflow.yml'
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest

@@ -1,0 +1,82 @@
+# .github/workflows/deploy-llmops.yml
+name: Deploy LLMOps Endpoint (100% Free)
+
+on:
+  push:
+    branches: [ lab1 ]
+  workflow_dispatch:
+    inputs:
+        workflow-path:
+          description: 'Path to the workflow file'
+          required: true
+          default: '.github\workflows\lab1-workflow.yml'
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      # 1. Checkout code
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Set up Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 3. Login to GitHub Container Registry (ghcr.io)
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 4. Build and push Docker image
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          push: true
+          tags: ghcr.io/${{ github.repository }}/llmops-api:latest
+
+      # 5. Install kind (Kubernetes IN Docker) - 100% FREE local cluster
+      - name: Create Kind Cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: llmops-cluster
+          version: v0.23.0
+
+      # 6. Deploy to Kind (real K8s, no cloud cost)
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply -f k8s/
+          kubectl rollout status deployment/llmops-api -n default --timeout=180s
+
+      # 7. Port-forward for testing
+      - name: Expose service
+        run: |
+          kubectl port-forward svc/llmops-service 8080:80 --address 0.0.0.0 &
+          echo "API running at http://localhost:8080"
+
+      # 8. Run integration tests
+      - name: Test endpoint
+        run: |
+          pip install requests pytest
+          pytest tests/test_api.py -v
+
+      # 9. Optional: Deploy to Oracle Cloud Free Tier OKE (uncomment if you have OCI)
+      # - name: Deploy to Oracle OKE (Free Forever)
+      #   if: false
+      #   uses: oracle-actions/setup-oci-cli@v1
+      #   with:
+      #     oci-config: ${{ secrets.OCI_CONFIG }}
+
+      # 10. Success message
+      - name: Success
+        run: |
+          echo "LLMOps API deployed successfully!"
+          echo "Access at: http://localhost:8080/v1/chat/completions"
+          echo "Live in GitHub Codespaces: https://github.com/codespaces"
