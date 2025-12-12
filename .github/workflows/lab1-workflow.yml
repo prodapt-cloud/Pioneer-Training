@@ -43,7 +43,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: llmops\Lab1-LLMOps-Pipeline\app
+          context: llmops/Lab1-LLMOps-Pipeline/app
           push: true
           tags: ghcr.io/${{ env.REPO_LOWER }}/llmops-api:latest
 
