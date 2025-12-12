@@ -5,3 +5,7 @@ jinja2
 litellm
 redis
 mlflow
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-instrumentation-fastapi
+opentelemetry-exporter-otlp

@@ -12,9 +12,47 @@ import litellm
 import redis
 import mlflow
 
+# OpenTelemetry imports
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.sdk.resources import Resource
+
+# Initialize OpenTelemetry
+OTEL_ENABLED = os.getenv("OTEL_ENABLED", "true").lower() == "true"
+if OTEL_ENABLED:
+    try:
+        resource = Resource(attributes={
+            "service.name": "llmops-api",
+            "service.version": "1.0.0",
+            "deployment.environment": os.getenv("ENVIRONMENT", "production")
+        })
+        
+        provider = TracerProvider(resource=resource)
+        
+        # Add OTLP exporter if endpoint is configured
+        otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        if otlp_endpoint:
+            otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
+            provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+        
+        trace.set_tracer_provider(provider)
+        tracer = trace.get_tracer(__name__)
+        print(f"✅ OpenTelemetry tracing enabled")
+    except Exception as e:
+        print(f"⚠️  OpenTelemetry initialization failed: {e}")
+        OTEL_ENABLED = False
+        tracer = None
+else:
+    print("ℹ️  OpenTelemetry tracing disabled")
+    tracer = None
+
+
 # === CONFIG ===
 r = redis.Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, db=0, decode_responses=True)
-PROMPT_PATH = "/app/prompt/assistant_v1.jinja2"
+PROMPT_PATH = "/app/prompt/assistant_v1_openai.jinja2"  # OpenAI-compatible prompt
 
 # Load prompt template
 with open(PROMPT_PATH) as f:
@@ -89,6 +127,15 @@ elif LLM_CONFIG["provider"] == "openai":
 else:
     print(f"   ⚠️  {LLM_CONFIG.get('error', 'Unknown error')}")
 
+# Instrument FastAPI with OpenTelemetry
+if OTEL_ENABLED and tracer:
+    try:
+        FastAPIInstrumentor.instrument_app(app)
+        print("✅ FastAPI instrumented with OpenTelemetry")
+    except Exception as e:
+        print(f"⚠️  FastAPI instrumentation failed: {e}")
+
+
 
 class ChatMessage(BaseModel):
     role: str
@@ -139,38 +186,55 @@ async def chat_completions(request: ChatCompletionRequest):
     user_msg = request.messages[-1].content
     dept = request.metadata.get("department", "general")
     cache_hit = False
+    
+    # Get current trace context
+    current_span = trace.get_current_span() if OTEL_ENABLED else None
+    trace_id = None
+    if current_span:
+        trace_id = format(current_span.get_span_context().trace_id, '032x')
 
     # Start MLflow run if enabled
     mlflow_run = None
     if MLFLOW_ENABLED:
         try:
             mlflow_run = mlflow.start_run(run_name=f"chat-{start_time.strftime('%Y%m%d-%H%M%S')}")
+            if trace_id:
+                mlflow.log_param("trace_id", trace_id)
         except Exception as e:
             print(f"⚠️  Failed to start MLflow run: {e}")
 
     try:
-        cache_key = get_cache_key([m.dict() for m in request.messages], dept)
-        if cached := r.get(cache_key):
-            print("Cache HIT")
-            cache_hit = True
-            resp_payload = json.loads(cached)
-            
-            # Log cache hit to MLflow
-            if mlflow_run:
-                mlflow.log_param("cache_hit", True)
-                mlflow.log_param("department", dept)
-                mlflow.log_metric("response_time_ms", (datetime.now() - start_time).total_seconds() * 1000)
-            
-            return JSONResponse(content=resp_payload)
+        # Span for cache lookup
+        with tracer.start_as_current_span("cache_lookup") if tracer else nullcontext():
+            cache_key = get_cache_key([m.dict() for m in request.messages], dept)
+            if cached := r.get(cache_key):
+                print("Cache HIT")
+                cache_hit = True
+                resp_payload = json.loads(cached)
+                
+                if current_span:
+                    current_span.set_attribute("cache.hit", True)
+                
+                # Log cache hit to MLflow
+                if mlflow_run:
+                    mlflow.log_param("cache_hit", True)
+                    mlflow.log_param("department", dept)
+                    mlflow.log_metric("response_time_ms", (datetime.now() - start_time).total_seconds() * 1000)
+                
+                return JSONResponse(content=resp_payload)
 
-        rendered = prompt_template.render(
-            current_date=datetime.now().strftime("%Y-%m-%d"),
-            department=dept,
-            user_question=user_msg
-        )
+        # Span for prompt rendering
+        with tracer.start_as_current_span("render_prompt") if tracer else nullcontext():
+            rendered = prompt_template.render(
+                current_date=datetime.now().strftime("%Y-%m-%d"),
+                department=dept,
+                user_question=user_msg
+            )
 
         # Check if LLM is configured
         if LLM_CONFIG["provider"] == "none":
+            if current_span:
+                current_span.set_attribute("error", "LLM not configured")
             if mlflow_run:
                 mlflow.log_param("error", "LLM not configured")
             return JSONResponse(
@@ -219,8 +283,16 @@ async def chat_completions(request: ChatCompletionRequest):
             mlflow.set_tag("environment", "production")
             mlflow.set_tag("department", dept)
         
+        # Span for LLM API call
         llm_start = datetime.now()
-        response = litellm.completion(**llm_params)
+        with tracer.start_as_current_span("llm_completion") if tracer else nullcontext() as llm_span:
+            if llm_span:
+                llm_span.set_attribute("llm.provider", LLM_CONFIG["provider"])
+                llm_span.set_attribute("llm.model", LLM_CONFIG["model"])
+                llm_span.set_attribute("llm.temperature", llm_params["temperature"])
+            
+            response = litellm.completion(**llm_params)
+        
         llm_duration = (datetime.now() - llm_start).total_seconds()
 
         answer = response.choices[0].message.content
@@ -247,7 +319,10 @@ async def chat_completions(request: ChatCompletionRequest):
         return JSONResponse(content=resp_payload)
     
     except Exception as e:
-        # Log error to MLflow
+        # Log error to MLflow and trace
+        if current_span:
+            current_span.set_attribute("error", True)
+            current_span.set_attribute("error.message", str(e))
         if mlflow_run:
             mlflow.log_param("error", str(e))
             mlflow.log_metric("error_occurred", 1)
@@ -257,3 +332,7 @@ async def chat_completions(request: ChatCompletionRequest):
         # End MLflow run
         if mlflow_run:
             mlflow.end_run()
+
+
+# Helper for null context when tracing is disabled
+from contextlib import nullcontext
