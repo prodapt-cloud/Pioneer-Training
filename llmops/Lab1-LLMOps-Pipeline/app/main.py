@@ -22,6 +22,57 @@ with open(PROMPT_PATH) as f:
 
 app = FastAPI(title="LLMOps Production API", version="1.0.0")
 
+# === LLM CONFIGURATION ===
+def get_llm_config():
+    """
+    Determine which LLM provider to use based on available credentials.
+    Priority: Azure OpenAI > OpenAI > Error
+    """
+    # Azure OpenAI configuration
+    azure_key = os.getenv("AZURE_OPENAI_KEY")
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+    azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o-mini")
+    
+    # OpenAI configuration
+    openai_key = os.getenv("OPENAI_API_KEY")
+    
+    if azure_key and azure_endpoint:
+        # Use Azure OpenAI
+        return {
+            "provider": "azure",
+            "model": f"azure/{azure_deployment}",
+            "api_key": azure_key,
+            "api_base": azure_endpoint,
+            "api_version": azure_api_version,
+        }
+    elif openai_key:
+        # Use OpenAI
+        return {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": openai_key,
+        }
+    else:
+        # No credentials available
+        return {
+            "provider": "none",
+            "error": "No LLM credentials configured. Set OPENAI_API_KEY or AZURE_OPENAI_KEY + AZURE_OPENAI_ENDPOINT"
+        }
+
+# Initialize LLM config at startup
+LLM_CONFIG = get_llm_config()
+print(f"🤖 LLM Provider: {LLM_CONFIG.get('provider', 'unknown')}")
+if LLM_CONFIG["provider"] == "azure":
+    print(f"   Model: {LLM_CONFIG['model']}")
+    print(f"   Endpoint: {LLM_CONFIG['api_base']}")
+    print(f"   API Version: {LLM_CONFIG['api_version']}")
+elif LLM_CONFIG["provider"] == "openai":
+    print(f"   Model: {LLM_CONFIG['model']}")
+else:
+    print(f"   ⚠️  {LLM_CONFIG.get('error', 'Unknown error')}")
+
+
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -42,7 +93,17 @@ async def health_check():
     try:
         # Check Redis connection
         r.ping()
-        return {"status": "healthy", "redis": "connected"}
+        health_data = {
+            "status": "healthy",
+            "redis": "connected",
+            "llm_provider": LLM_CONFIG.get("provider", "unknown"),
+        }
+        
+        # Add LLM model info if configured
+        if LLM_CONFIG["provider"] != "none":
+            health_data["llm_model"] = LLM_CONFIG.get("model", "unknown")
+        
+        return health_data
     except Exception as e:
         return JSONResponse(
             status_code=503,
@@ -71,12 +132,31 @@ async def chat_completions(request: ChatCompletionRequest):
         user_question=user_msg
     )
 
-    response = litellm.completion(
-        model="ollama/llama3.2:3b",
-        messages=[{"role": "user", "content": rendered}],
-        temperature=0.3,
-        max_tokens=512
-    )
+    # Check if LLM is configured
+    if LLM_CONFIG["provider"] == "none":
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "LLM not configured",
+                "message": LLM_CONFIG.get("error", "No LLM credentials available")
+            }
+        )
+
+    # Call LLM with appropriate configuration
+    llm_params = {
+        "model": LLM_CONFIG["model"],
+        "messages": [{"role": "user", "content": rendered}],
+        "temperature": 0.3,
+        "max_tokens": 512,
+        "api_key": LLM_CONFIG["api_key"],
+    }
+    
+    # Add Azure-specific parameters if using Azure
+    if LLM_CONFIG["provider"] == "azure":
+        llm_params["api_base"] = LLM_CONFIG["api_base"]
+        llm_params["api_version"] = LLM_CONFIG["api_version"]
+    
+    response = litellm.completion(**llm_params)
 
     answer = response.choices[0].message.content
 

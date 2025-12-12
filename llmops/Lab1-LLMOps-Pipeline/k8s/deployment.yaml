@@ -24,6 +24,34 @@ spec:
         env:
         - name: PORT
           value: "8000"
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llmops-api-keys
+              key: OPENAI_API_KEY
+              optional: true
+        - name: AZURE_OPENAI_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llmops-api-keys
+              key: AZURE_OPENAI_KEY
+              optional: true
+        - name: AZURE_OPENAI_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: llmops-api-keys
+              key: AZURE_OPENAI_ENDPOINT
+              optional: true
+        - name: AZURE_OPENAI_API_VERSION
+          value: "2024-02-15-preview"
+        - name: AZURE_OPENAI_DEPLOYMENT_NAME
+          value: "gpt-4o-mini"
+        - name: GROQ_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llmops-api-keys
+              key: GROQ_API_KEY
+              optional: true
         readinessProbe:
           httpGet:
             path: /health

@@ -61,15 +61,17 @@ jobs:
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
           
-          # Update the image name using yq
+          # Update the image name using yq (only in the Deployment, document 0)
           export IMAGE_NAME="ghcr.io/${{ env.REPO_LOWER }}/llmops-api:latest"
-          yq eval ".spec.template.spec.containers[0].image = \"${IMAGE_NAME}\"" -i llmops/Lab1-LLMOps-Pipeline/k8s/deployment.yaml
+          yq eval-all '(select(di == 0) | .spec.template.spec.containers[0].image = strenv(IMAGE_NAME)) // .' -i llmops/Lab1-LLMOps-Pipeline/k8s/deployment.yaml
           
           echo "=== Updated deployment.yaml ==="
           cat llmops/Lab1-LLMOps-Pipeline/k8s/deployment.yaml
           echo ""
           echo "=== Verifying image name ==="
-          yq eval '.spec.template.spec.containers[0].image' llmops/Lab1-LLMOps-Pipeline/k8s/deployment.yaml
+          yq eval 'select(di == 0) | .spec.template.spec.containers[0].image' llmops/Lab1-LLMOps-Pipeline/k8s/deployment.yaml
+          echo "=== Verifying Service is intact ==="
+          yq eval 'select(di == 1) | .kind' llmops/Lab1-LLMOps-Pipeline/k8s/deployment.yaml
 
       # 8. Create image pull secret for GHCR
       - name: Create image pull secret
@@ -79,6 +81,17 @@ jobs:
             --docker-username=${{ github.actor }} \
             --docker-password=${{ secrets.GITHUB_TOKEN }} \
             --docker-email=${{ github.actor }}@users.noreply.github.com || true
+
+      # 8b. Create secret for API keys (OpenAI, Azure, etc.)
+      - name: Create API key secrets
+        run: |
+          kubectl create secret generic llmops-api-keys \
+            --from-literal=OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            --from-literal=AZURE_OPENAI_KEY=${{ secrets.AZURE_OPENAI_KEY }} \
+            --from-literal=AZURE_OPENAI_ENDPOINT=${{ secrets.AZURE_OPENAI_ENDPOINT }} \
+            --from-literal=GROQ_API_KEY=${{ secrets.GROQ_API_KEY }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          echo "API secrets created/updated"
 
       # 9. Deploy Redis first
       - name: Deploy Redis
