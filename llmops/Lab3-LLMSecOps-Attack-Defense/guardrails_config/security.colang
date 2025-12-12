@@ -1,0 +1,17 @@
+define user ask ignore instructions
+    "ignore" "previous" "instructions" "DAN" "jailbreak"
+
+define bot refuse
+    "I'm sorry, I can't assist with that request."
+
+define flow
+    user ask ignore instructions
+    bot refuse
+    stop
+
+define user ask harmful
+    "bomb" "ransomware" "illegal" "hack"
+
+define flow
+    user ask harmful
+    bot refuse

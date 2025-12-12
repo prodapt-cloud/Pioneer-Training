@@ -1,0 +1,39 @@
+# k8s/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmops-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llmops-api
+  template:
+    metadata:
+      labels:
+        app: llmops-api
+    spec:
+      containers:
+      - name: llmops
+        image: ghcr.io/${{ github.repository }}/llmops-api:latest
+        ports:
+        - containerPort: 8000
+        resources:
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llmops-service
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 8000
+  selector:
+    app: llmops-api

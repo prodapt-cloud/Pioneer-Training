@@ -1,0 +1,566 @@
+{
+    "cells": [
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "# Lab 1: Production-Ready LLMOps Endpoint\n",
+                "## Build a Secure, Observable, Versioned, Cached LLM API\n",
+                "\n",
+                "**Goal**: Create a real `/v1/chat/completions` endpoint with enterprise-grade LLMOps features\n",
+                "\n",
+                "Features you'll implement:\n",
+                "- Jinja2 Prompt Templates\n",
+                "- MLflow Prompt Registry (versioned prompts)\n",
+                "- Redis Semantic + Exact Caching\n",
+                "- OpenTelemetry + Arize Phoenix Tracing\n",
+                "- OpenAI-compatible FastAPI endpoint\n",
+                "- **Supports both OpenAI and Azure OpenAI**\n",
+                "\n",
+                "Setup Requirements:\n",
+                "```bash\n",
+                "# Set up your LLM provider in the secrets folder\n",
+                "# 1. Copy the example file:\n",
+                "cp secrets/.env.example secrets/.env\n",
+                "\n",
+                "# 2. Edit secrets/.env and choose your provider:\n",
+                "#    - For OpenAI: Set LLM_PROVIDER=openai and add OPENAI_API_KEY\n",
+                "#    - For Azure: Set LLM_PROVIDER=azure and add Azure credentials\n",
+                "\n",
+                "# 3. See secrets/README.md for detailed configuration instructions\n",
+                "```"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "# Install dependencies (run once)\n",
+                "!pip install --quiet fastapi uvicorn openai langchain-core>=1.0.0 langchain-community mlflow redis openinference-instrumentation-langchain opentelemetry-sdk opentelemetry-exporter-otlp jinja2 arize-phoenix python-multipart requests==2.32.4 grpcio>=1.71.2 openinference-instrumentation-openai"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "import subprocess\n",
+                "import time\n",
+                "import redis\n",
+                "# Start Redis server in the background\n",
+                "redis_process = subprocess.Popen(['redis-server', '--port', '6379'], \n",
+                "                                  stdout=subprocess.PIPE, \n",
+                "                                  stderr=subprocess.PIPE)\n",
+                "# Wait a moment for Redis to start\n",
+                "time.sleep(2)\n",
+                "# Connect to Redis\n",
+                "r = redis.Redis(host='localhost', port=6379, decode_responses=True)\n",
+                "# Test the connection\n",
+                "r.set('test_key', 'Hello from notebook!')\n",
+                "print(r.get('test_key'))\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "import os\n",
+                "import mlflow\n",
+                "import redis\n",
+                "import hashlib\n",
+                "import json\n",
+                "from datetime import datetime\n",
+                "from jinja2 import Template\n",
+                "from fastapi import FastAPI, Request, HTTPException\n",
+                "from fastapi.responses import JSONResponse\n",
+                "from pydantic import BaseModel\n",
+                "from typing import List, Dict, Any\n",
+                "from openai import OpenAI\n",
+                "from langchain_core.prompts import ChatPromptTemplate\n",
+                "import phoenix as px"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 1. Configure LLM Provider (OpenAI or Azure OpenAI)\n",
+                "\n",
+                "We'll load credentials from `secrets/.env` which supports both OpenAI and Azure OpenAI."
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "# Load environment variables from secrets folder\n",
+                "from load_env import load_env_from_secrets, get_llm_provider, get_openai_client\n",
+                "\n",
+                "try:\n",
+                "    # Load all environment variables from secrets/.env\n",
+                "    env_vars = load_env_from_secrets()\n",
+                "    provider = get_llm_provider()\n",
+                "    \n",
+                "    print(\"\u2713 Environment variables loaded from secrets/.env\")\n",
+                "    print(f\"\u2713 Found {len(env_vars)} variables\")\n",
+                "    print(f\"\u2713 LLM Provider: {provider.upper()}\")\n",
+                "    \n",
+                "    # Initialize the appropriate client based on provider\n",
+                "    client = get_openai_client()\n",
+                "    \n",
+                "    # Get deployment name for Azure (needed for API calls)\n",
+                "    if provider == 'azure':\n",
+                "        DEPLOYMENT_NAME = os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME')\n",
+                "        print(f\"\u2713 Using deployment: {DEPLOYMENT_NAME}\")\n",
+                "    \n",
+                "except FileNotFoundError as e:\n",
+                "    print(\"\u274c Error: secrets/.env file not found!\")\n",
+                "    print(\"\\nPlease follow these steps:\")\n",
+                "    print(\"1. Copy secrets/.env.example to secrets/.env\")\n",
+                "    print(\"2. Edit secrets/.env and configure your LLM provider\")\n",
+                "    print(\"   - For OpenAI: Set LLM_PROVIDER=openai and add OPENAI_API_KEY\")\n",
+                "    print(\"   - For Azure: Set LLM_PROVIDER=azure and add Azure credentials\")\n",
+                "    print(\"3. See secrets/README.md for detailed instructions\")\n",
+                "    raise\n",
+                "\n",
+                "except ValueError as e:\n",
+                "    print(f\"\u274c Error: {e}\")\n",
+                "    print(\"\\nPlease check your secrets/.env configuration\")\n",
+                "    raise\n",
+                "\n",
+                "print(\"\u2713 LLM client initialized successfully!\")"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 2. Start Phoenix Observability (OpenTelemetry UI)"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "# Launch Phoenix (runs on http://localhost:6006)\n",
+                "px.launch_app()"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 3. Connect to Redis (Caching Layer)"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "# Start Redis in background (or use Docker: redis:7)\n",
+                "r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)\n",
+                "r.ping()\n",
+                "print(\"\u2713 Redis connection successful!\")"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 4. Prompt Templating with Jinja2 + MLflow Registry"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "# Create prompts directory\n",
+                "os.makedirs(\"prompts\", exist_ok=True)\n",
+                "\n",
+                "# Save prompt template v1\n",
+                "prompt_v1 = \"\"\"\n",
+                "You are a helpful enterprise assistant. Be professional and concise.\n",
+                "\n",
+                "Current date: {{ current_date }}\n",
+                "User department: {{ department }}\n",
+                "\n",
+                "Question: {{ user_question }}\n",
+                "\n",
+                "Answer in under 150 words.\n",
+                "\"\"\"\n",
+                "\n",
+                "with open(\"prompts/assistant_v1.jinja2\", \"w\") as f:\n",
+                "    f.write(prompt_v1)\n",
+                "\n",
+                "print(\"\u2713 Prompt template saved!\")"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "# Initialize MLflow (local tracking)\n",
+                "mlflow.set_tracking_uri(\"file:./mlflow\")\n",
+                "mlflow.set_experiment(\"LLMOps_Prompt_Registry\")\n",
+                "\n",
+                "# Register prompt as artifact\n",
+                "with mlflow.start_run(run_name=\"prompt-v1.0.0\"):\n",
+                "    mlflow.log_artifact(\"prompts/assistant_v1.jinja2\", artifact_path=\"prompts\")\n",
+                "    mlflow.set_tag(\"prompt.version\", \"1.0.0\")\n",
+                "    mlflow.set_tag(\"author\", \"student\")\n",
+                "    mlflow.log_param(\"max_tokens\", 512)\n",
+                "    mlflow.log_param(\"temperature\", 0.3)\n",
+                "    mlflow.log_param(\"model\", \"gpt-3.5-turbo\")\n",
+                "    \n",
+                "print(f\"\u2713 Prompt v1.0.0 registered in MLflow!\")\n",
+                "print(f\"View at: http://localhost:5000 (run `mlflow ui` in terminal)\")"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 5. Load Latest Prompt from Registry"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def load_latest_prompt() -> Template:\n",
+                "    # In real system: query MLflow for latest version\n",
+                "    with open(\"prompts/assistant_v1.jinja2\") as f:\n",
+                "        template = Template(f.read())\n",
+                "    return template\n",
+                "\n",
+                "prompt_template = load_latest_prompt()\n",
+                "print(\"\u2713 Latest prompt loaded!\")"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 6. Semantic + Exact Match Caching"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def get_cache_key(messages: List[Dict], department: str) -> str:\n",
+                "    content = json.dumps(messages) + department\n",
+                "    return \"cache:\" + hashlib.sha256(content.encode()).hexdigest()\n",
+                "\n",
+                "def get_cached_response(key: str):\n",
+                "    cached = r.get(key)\n",
+                "    if cached:\n",
+                "        print(\"\u2713 Cache HIT\")\n",
+                "        return json.loads(cached)\n",
+                "    print(\"\u2717 Cache MISS\")\n",
+                "    return None\n",
+                "\n",
+                "def set_cache(key: str, response: Dict, ttl: int = 3600):\n",
+                "    r.setex(key, ttl, json.dumps(response))"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 7. LLM Call with OpenAI API"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def generate_response(prompt: str, model: str = None, temperature: float = 0.3, max_tokens: int = 512):\n",
+                "    \"\"\"\n",
+                "    Generate a response using OpenAI or Azure OpenAI API\n",
+                "    \n",
+                "    Args:\n",
+                "        prompt: The user prompt\n",
+                "        model: Model to use (for OpenAI) or None to use Azure deployment\n",
+                "        temperature: Sampling temperature (0-2)\n",
+                "        max_tokens: Maximum tokens in response\n",
+                "    \"\"\"\n",
+                "    try:\n",
+                "        # For Azure OpenAI, use the deployment name instead of model\n",
+                "        if provider == 'azure':\n",
+                "            response = client.chat.completions.create(\n",
+                "                model=DEPLOYMENT_NAME,  # Azure uses deployment name\n",
+                "                messages=[{\"role\": \"user\", \"content\": prompt}],\n",
+                "                temperature=temperature,\n",
+                "                max_tokens=max_tokens\n",
+                "            )\n",
+                "        else:\n",
+                "            # For OpenAI, use the model parameter\n",
+                "            response = client.chat.completions.create(\n",
+                "                model=model or \"gpt-3.5-turbo\",\n",
+                "                messages=[{\"role\": \"user\", \"content\": prompt}],\n",
+                "                temperature=temperature,\n",
+                "                max_tokens=max_tokens\n",
+                "            )\n",
+                "        return response.choices[0].message.content\n",
+                "    except Exception as e:\n",
+                "        raise HTTPException(status_code=500, detail=f\"LLM API error: {str(e)}\")"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 8. FastAPI OpenAI-Compatible Endpoint"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "@app.post(\"/v1/chat/completions\")\n",
+                "async def chat_completions(request: ChatCompletionRequest):\n",
+                "    user_question = request.messages[-1].content\n",
+                "    department = request.metadata.get(\"department\", \"general\")\n",
+                "    \n",
+                "    # Cache key\n",
+                "    cache_key = get_cache_key([m.dict() for m in request.messages], department)\n",
+                "    cached = get_cached_response(cache_key)\n",
+                "    if cached:\n",
+                "        return cached\n",
+                "    \n",
+                "    # Render prompt\n",
+                "    rendered_prompt = prompt_template.render(\n",
+                "        current_date=datetime.now().strftime(\"%Y-%m-%d\"),\n",
+                "        department=department,\n",
+                "        user_question=user_question\n",
+                "    )\n",
+                "    \n",
+                "    # Generate using the configured provider\n",
+                "    if provider == 'azure':\n",
+                "        # Azure uses deployment name, not model parameter\n",
+                "        answer = generate_response(\n",
+                "            rendered_prompt,\n",
+                "            model=None,  # Will use DEPLOYMENT_NAME\n",
+                "            temperature=request.temperature,\n",
+                "            max_tokens=request.max_tokens\n",
+                "        )\n",
+                "    else:\n",
+                "        # OpenAI uses model parameter\n",
+                "        answer = generate_response(\n",
+                "            rendered_prompt,\n",
+                "            model=request.model,\n",
+                "            temperature=request.temperature,\n",
+                "            max_tokens=request.max_tokens\n",
+                "        )\n",
+                "    \n",
+                "    # Cache result\n",
+                "    response = {\n",
+                "        \"id\": \"chatcmpl-123\",\n",
+                "        \"object\": \"chat.completion\",\n",
+                "        \"created\": int(datetime.now().timestamp()),\n",
+                "        \"model\": request.model if provider == 'openai' else DEPLOYMENT_NAME,\n",
+                "        \"choices\": [{\n",
+                "            \"index\": 0,\n",
+                "            \"message\": {\n",
+                "                \"role\": \"assistant\",\n",
+                "                \"content\": answer\n",
+                "            },\n",
+                "            \"finish_reason\": \"stop\"\n",
+                "        }],\n",
+                "        \"usage\": {\"prompt_tokens\": 150, \"completion_tokens\": 80, \"total_tokens\": 230}\n",
+                "    }\n",
+                "    \n",
+                "    set_cache(cache_key, response)\n",
+                "    return JSONResponse(content=response)\n",
+                "\n",
+                "@app.get(\"/health\")\n",
+                "async def health_check():\n",
+                "    return {\"status\": \"healthy\", \"provider\": provider}\n",
+                "\n",
+                "print(\"\u2713 API Ready!\")\n",
+                "print(f\"\u2713 Using provider: {provider.upper()}\")\n",
+                "print(\"Run the next cell to start server\")"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 9. Start the Production Server"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "# In a real notebook, use: uvicorn.run(app, port=8000)\n",
+                "# For Jupyter, use thread\n",
+                "\n",
+                "import threading\n",
+                "import uvicorn\n",
+                "\n",
+                "def start_server():\n",
+                "    uvicorn.run(app, host=\"0.0.0.0\", port=8000)\n",
+                "\n",
+                "thread = threading.Thread(target=start_server, daemon=True)\n",
+                "thread.start()\n",
+                "\n",
+                "import time\n",
+                "time.sleep(2)  # Give server time to start\n",
+                "\n",
+                "print(\"\u2713 Production LLMOps API is LIVE!\")\n",
+                "print(\"\ud83d\udce1 Endpoint: http://localhost:8000/v1/chat/completions\")\n",
+                "print(\"\ud83d\udcca OpenTelemetry traces: http://localhost:6006\")\n",
+                "print(\"\ud83d\udd0d Health check: http://localhost:8000/health\")"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 10. Test Your Production Endpoint"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "import requests\n",
+                "import time\n",
+                "\n",
+                "payload = {\n",
+                "    \"model\": \"gpt-3.5-turbo\",\n",
+                "    \"messages\": [{\"role\": \"user\", \"content\": \"What is our vacation policy?\"}],\n",
+                "    \"metadata\": {\"department\": \"HR\"}\n",
+                "}\n",
+                "\n",
+                "print(\"Testing API endpoint...\\n\")\n",
+                "\n",
+                "# First call (cache miss)\n",
+                "start = time.time()\n",
+                "resp1 = requests.post(\"http://localhost:8000/v1/chat/completions\", json=payload)\n",
+                "time1 = time.time() - start\n",
+                "\n",
+                "# Second call (cache hit)\n",
+                "start = time.time()\n",
+                "resp2 = requests.post(\"http://localhost:8000/v1/chat/completions\", json=payload)\n",
+                "time2 = time.time() - start\n",
+                "\n",
+                "print(f\"\u23f1\ufe0f  First call (cache miss): {time1:.2f}s\")\n",
+                "print(f\"\u26a1 Second call (cache hit): {time2:.2f}s \u2192 {time1/time2:.1f}x faster!\\n\")\n",
+                "print(f\"\ud83d\udcdd Response: {resp1.json()['choices'][0]['message']['content'][:200]}...\")"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## 11. Test with Different Models\n",
+                "\n",
+                "You can test with different OpenAI models:"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "# Test with GPT-4 (more expensive but higher quality)\n",
+                "payload_gpt4 = {\n",
+                "    \"model\": \"gpt-4\",\n",
+                "    \"messages\": [{\"role\": \"user\", \"content\": \"Explain quantum computing in simple terms\"}],\n",
+                "    \"temperature\": 0.7,\n",
+                "    \"max_tokens\": 200,\n",
+                "    \"metadata\": {\"department\": \"Engineering\"}\n",
+                "}\n",
+                "\n",
+                "resp_gpt4 = requests.post(\"http://localhost:8000/v1/chat/completions\", json=payload_gpt4)\n",
+                "print(f\"GPT-4 Response:\\n{resp_gpt4.json()['choices'][0]['message']['content']}\")"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "When done, stop Redis"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "\n",
+                "redis_process.terminate()\n",
+                "redis_process.wait()"
+            ]
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## Final Submission Checklist\n",
+                "\n",
+                "Take these screenshots:\n",
+                "1. Phoenix tracing UI showing spans\n",
+                "2. MLflow UI with prompt v1.0.0\n",
+                "3. Cache HIT in logs\n",
+                "4. API response from curl/postman\n",
+                "5. `mlflow ui` and `redis-cli monitor` output\n",
+                "\n",
+                "### Key Differences from Ollama Version:\n",
+                "- \u2705 Uses OpenAI API (requires API key)\n",
+                "- \u2705 Access to GPT-3.5, GPT-4, and other OpenAI models\n",
+                "- \u2705 Higher quality responses\n",
+                "- \u2705 No local model installation required\n",
+                "- \u26a0\ufe0f Costs money per API call (check OpenAI pricing)\n",
+                "- \u26a0\ufe0f Requires internet connection\n",
+                "\n",
+                "You just built a production-grade LLMOps endpoint using OpenAI!"
+            ]
+        }
+    ],
+    "metadata": {
+        "kernelspec": {
+            "display_name": "Python 3 (ipykernel)",
+            "language": "python",
+            "name": "python3"
+        },
+        "language_info": {
+            "name": "python",
+            "version": "3.12.0"
+        }
+    },
+    "nbformat": 4,
+    "nbformat_minor": 2
+}

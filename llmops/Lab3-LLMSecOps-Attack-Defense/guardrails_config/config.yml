@@ -1,0 +1,11 @@
+models:
+  - type: main
+    engine: ollama
+    model: llama3.2:3b
+
+rails:
+  config:
+    moderation:
+      input:
+        - type: llama_guard
+          model: meta-llama/Meta-LlamaGuard-3-8B

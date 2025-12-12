@@ -1,0 +1,69 @@
+version: "3.9"
+
+services:
+  # ================= OLLAMA + LLAMA 3.2 (AUTO-PULL) =================
+  ollama:
+    image: ollama/ollama:0.3.12
+    container_name: ollama-lab3
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:                     # Works on Docker Desktop + Linux
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: >
+      sh -c "
+      ollama serve &
+      sleep 5 &&
+      echo 'Pulling llama3.2:3b (this takes ~2 mins first time)...' &&
+      ollama pull llama3.2:3b &&
+      echo 'Llama 3.2 ready! Keep this container running.' &&
+      wait
+      "
+
+  # ================= VULNERABLE RAG APP (NO DEFENSES) =================
+  vulnerable:
+    build: ./vulnerable_app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - ollama
+      - chroma
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+
+  # ================= SECURE RAG APP (FULL DEFENSES) =================
+  secure:
+    build: ./secure_app
+    ports:
+      - "8001:8001"
+    depends_on:
+      - ollama
+      - chroma
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+
+  # ================= VECTOR DB (LOCAL CHROMA) =================
+  chroma:
+    image: chromadb/chroma:0.5.5
+    ports:
+      - "8002:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - ANONYMIZED_TELEMETRY=False
+
+  # ================= REDIS (FOR FUTURE CACHING LABS) =================
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  ollama_data:
+  chroma_data:
