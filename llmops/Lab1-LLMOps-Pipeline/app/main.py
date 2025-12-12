@@ -66,13 +66,19 @@ MLFLOW_ENABLED = os.getenv("MLFLOW_ENABLED", "true").lower() == "true"
 if MLFLOW_ENABLED:
     try:
         mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        
+        # Set local artifact storage to avoid GCS anonymous credentials error
+        os.environ["MLFLOW_ARTIFACT_ROOT"] = "/tmp/mlflow-artifacts"
+        
         mlflow.set_experiment("llmops-production-api")
         print(f"✅ MLflow tracking enabled: {MLFLOW_TRACKING_URI}")
+        print(f"   Artifact storage: /tmp/mlflow-artifacts")
     except Exception as e:
         print(f"⚠️  MLflow tracking disabled: {e}")
         MLFLOW_ENABLED = False
 else:
     print("ℹ️  MLflow tracking disabled (MLFLOW_ENABLED=false)")
+
 
 
 app = FastAPI(title="LLMOps Production API", version="1.0.0")
@@ -292,10 +298,13 @@ async def chat_completions(request: ChatCompletionRequest):
                 mlflow.log_param("api_version", llm_params["api_version"])
                 mlflow.log_param("api_base", llm_params["api_base"])
             
-            # Log prompt template
-            mlflow.log_text(PROMPT_CONTENT, "prompt_template.jinja2")
-            mlflow.log_text(rendered, "rendered_prompt.txt")
-            mlflow.log_text(user_msg, "user_message.txt")
+            # Log prompt template (non-blocking)
+            try:
+                mlflow.log_text(PROMPT_CONTENT, "prompt_template.jinja2")
+                mlflow.log_text(rendered, "rendered_prompt.txt")
+                mlflow.log_text(user_msg, "user_message.txt")
+            except Exception as e:
+                print(f"⚠️  Failed to log artifacts to MLflow: {e}")
             
             # Log tags
             mlflow.set_tag("environment", "production")
@@ -322,7 +331,12 @@ async def chat_completions(request: ChatCompletionRequest):
             mlflow.log_metric("prompt_tokens", response.usage.prompt_tokens if hasattr(response, 'usage') else 0)
             mlflow.log_metric("completion_tokens", response.usage.completion_tokens if hasattr(response, 'usage') else 0)
             mlflow.log_metric("total_tokens", response.usage.total_tokens if hasattr(response, 'usage') else 0)
-            mlflow.log_text(answer, "response.txt")
+            
+            # Log response text (non-blocking)
+            try:
+                mlflow.log_text(answer, "response.txt")
+            except Exception as e:
+                print(f"⚠️  Failed to log response artifact: {e}")
 
         resp_payload = {
             "id": "chatcmpl-xyz",
