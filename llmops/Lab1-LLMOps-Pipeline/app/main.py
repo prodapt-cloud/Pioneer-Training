@@ -83,6 +83,10 @@ def get_llm_config():
     Determine which LLM provider to use based on available credentials.
     Priority: Azure OpenAI > OpenAI > Error
     """
+    print("=" * 60)
+    print("🔍 LLM Configuration Debug")
+    print("=" * 60)
+    
     # Azure OpenAI configuration
     azure_key = os.getenv("AZURE_OPENAI_KEY")
     azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
@@ -92,8 +96,17 @@ def get_llm_config():
     # OpenAI configuration
     openai_key = os.getenv("OPENAI_API_KEY")
     
+    # Debug: Show what's detected (masked)
+    print(f"AZURE_OPENAI_KEY: {'SET (len=' + str(len(azure_key)) + ')' if azure_key else 'NOT SET'}")
+    print(f"AZURE_OPENAI_ENDPOINT: {azure_endpoint if azure_endpoint else 'NOT SET'}")
+    print(f"AZURE_OPENAI_API_VERSION: {azure_api_version}")
+    print(f"AZURE_OPENAI_DEPLOYMENT_NAME: {azure_deployment}")
+    print(f"OPENAI_API_KEY: {'SET (len=' + str(len(openai_key)) + ')' if openai_key else 'NOT SET'}")
+    print("=" * 60)
+    
     if azure_key and azure_endpoint:
         # Use Azure OpenAI
+        print("✅ Selected: Azure OpenAI")
         return {
             "provider": "azure",
             "model": f"azure/{azure_deployment}",
@@ -103,6 +116,7 @@ def get_llm_config():
         }
     elif openai_key:
         # Use OpenAI
+        print("✅ Selected: OpenAI")
         return {
             "provider": "openai",
             "model": "gpt-4o-mini",
@@ -110,6 +124,10 @@ def get_llm_config():
         }
     else:
         # No credentials available
+        print("❌ No LLM credentials found!")
+        print("   Please set either:")
+        print("   - OPENAI_API_KEY, OR")
+        print("   - AZURE_OPENAI_KEY + AZURE_OPENAI_ENDPOINT")
         return {
             "provider": "none",
             "error": "No LLM credentials configured. Set OPENAI_API_KEY or AZURE_OPENAI_KEY + AZURE_OPENAI_ENDPOINT"
