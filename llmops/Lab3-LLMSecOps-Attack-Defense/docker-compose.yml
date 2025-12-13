@@ -1,30 +1,30 @@
 version: "3.9"
 
 services:
-  # ================= OLLAMA + LLAMA 3.2 (AUTO-PULL) =================
-  ollama:
-    image: ollama/ollama:0.3.12
-    container_name: ollama-lab3
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    deploy:                     # Works on Docker Desktop + Linux
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    command: >
-      sh -c "
-      ollama serve &
-      sleep 5 &&
-      echo 'Pulling llama3.2:3b (this takes ~2 mins first time)...' &&
-      ollama pull llama3.2:3b &&
-      echo 'Llama 3.2 ready! Keep this container running.' &&
-      wait
-      "
+  # ================= OLLAMA (Local LLM) - DISABLED FOR AZURE LAB =================
+  # ollama:
+  #   image: ollama/ollama:0.3.12
+  #   container_name: ollama-lab3
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   deploy:                     # Works on Docker Desktop + Linux
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]
+  #   command: >
+  #     sh -c "
+  #     ollama serve &
+  #     sleep 5 &&
+  #     echo 'Pulling llama3.2:3b (this takes ~2 mins first time)...' &&
+  #     ollama pull llama3.2:3b &&
+  #     echo 'Llama 3.2 ready! Keep this container running.' &&
+  #     wait
+  #     "
 
   # ================= VULNERABLE RAG APP (NO DEFENSES) =================
   vulnerable:
@@ -32,10 +32,14 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - ollama
+      # - ollama
       - chroma
     environment:
-      - OLLAMA_HOST=http://ollama:11434
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+      - AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION}
+      - AZURE_OPENAI_DEPLOYMENT_NAME=${AZURE_OPENAI_DEPLOYMENT_NAME}
+      - AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=${AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME}
 
   # ================= SECURE RAG APP (FULL DEFENSES) =================
   secure:
@@ -43,10 +47,14 @@ services:
     ports:
       - "8001:8001"
     depends_on:
-      - ollama
+      # - ollama
       - chroma
     environment:
-      - OLLAMA_HOST=http://ollama:11434
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+      - AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION}
+      - AZURE_OPENAI_DEPLOYMENT_NAME=${AZURE_OPENAI_DEPLOYMENT_NAME}
+      - AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=${AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME}
 
   # ================= VECTOR DB (LOCAL CHROMA) =================
   chroma:

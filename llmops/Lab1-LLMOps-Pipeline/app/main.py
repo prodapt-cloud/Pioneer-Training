@@ -26,7 +26,7 @@ if OTEL_ENABLED:
         # This automatically sets up the OTLP exporter to the endpoint
         tracer_provider = register(
             project_name="llmops-api",
-            endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+            endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:6006"),
             set_global_tracer_provider=True
         )
         
@@ -57,7 +57,7 @@ class MockRedis:
 
 if REDIS_ENABLED:
     try:
-        r = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
+        r = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True, socket_timeout=5)
         r.ping() # Fail fast if not reachable
         print(f"✅ Redis connected: {REDIS_HOST}")
     except Exception as e:
@@ -91,6 +91,7 @@ if MLFLOW_ENABLED:
         os.environ["MLFLOW_ARTIFACT_ROOT"] = "/tmp/mlflow-artifacts"
         
         mlflow.set_experiment("llmops-production-api")
+        mlflow.openai.autolog()
         print(f"✅ MLflow tracking enabled: {MLFLOW_TRACKING_URI}")
         print(f"   Artifact storage: /tmp/mlflow-artifacts")
     except Exception as e:
@@ -117,7 +118,7 @@ def get_llm_config():
     azure_key = os.getenv("AZURE_OPENAI_KEY")
     azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
     azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
-    azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o-mini")
+    azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1-mini")
     
     # Debug: Show what's detected (masked)
     print(f"AZURE_OPENAI_KEY: {'SET (len=' + str(len(azure_key)) + ')' if azure_key else 'NOT SET'}")

@@ -53,7 +53,7 @@ jobs:
       - name: Deploy to Kubernetes
         run: |
           kubectl apply -f k8s/
-          kubectl rollout status deployment/llmops-api -n default --timeout=180s
+          kubectl rollout status deployment/llmops-api -n default --timeout=240s
 
       # 7. Port-forward for testing
       - name: Expose service
