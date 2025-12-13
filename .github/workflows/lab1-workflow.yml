@@ -141,7 +141,8 @@ jobs:
           kubectl exec $POD_NAME -- sh -c 'echo "OPENAI_API_KEY: ${OPENAI_API_KEY:+SET}" || echo "OPENAI_API_KEY: NOT SET"'
           kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_KEY: ${AZURE_OPENAI_KEY:+SET}" || echo "AZURE_OPENAI_KEY: NOT SET"'
           kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:+SET}" || echo "AZURE_OPENAI_ENDPOINT: NOT SET"'
-          
+          kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_ENDPOINT LENGTH: ${#AZURE_OPENAI_ENDPOINT}" '
+
           echo "=== Pod Startup Logs ==="
           kubectl logs $POD_NAME --tail=30 | grep -E "(LLM|MLflow|OpenTelemetry|Provider)" || true
       
