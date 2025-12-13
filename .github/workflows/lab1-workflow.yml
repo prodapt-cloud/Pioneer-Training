@@ -144,7 +144,7 @@ jobs:
           kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_ENDPOINT LENGTH: ${#AZURE_OPENAI_ENDPOINT}" '
 
           echo "=== Pod Startup Logs ==="
-          kubectl logs $POD_NAME --tail=30 | grep -E "(LLM|MLflow|OpenTelemetry|Provider)" || true
+          kubectl logs $POD_NAME --tail=300 | grep -E "(LLM|MLflow|OpenTelemetry|Provider|AZURE)" || true
       
       # 9. Debug deployment if it fails
       - name: Debug deployment on failure
