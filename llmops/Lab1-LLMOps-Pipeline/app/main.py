@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any
 from jinja2 import Template
-import litellm
+from openai import AzureOpenAI
 import redis
 import mlflow
 
@@ -86,8 +86,8 @@ app = FastAPI(title="LLMOps Production API", version="1.0.0")
 # === LLM CONFIGURATION ===
 def get_llm_config():
     """
-    Determine which LLM provider to use based on available credentials.
-    Priority: Azure OpenAI > OpenAI > Error
+    Initialize Azure OpenAI client based on environment variables.
+    Returns: (client, deployment_name, provider) or (None, None, "none")
     """
     print("=" * 60)
     print("🔍 LLM Configuration Debug")
@@ -99,57 +99,46 @@ def get_llm_config():
     azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
     azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o-mini")
     
-    # OpenAI configuration
-    openai_key = os.getenv("OPENAI_API_KEY")
-    
     # Debug: Show what's detected (masked)
     print(f"AZURE_OPENAI_KEY: {'SET (len=' + str(len(azure_key)) + ')' if azure_key else 'NOT SET'}")
     print(f"AZURE_OPENAI_ENDPOINT: {azure_endpoint if azure_endpoint else 'NOT SET'}")
     print(f"AZURE_OPENAI_API_VERSION: {azure_api_version}")
     print(f"AZURE_OPENAI_DEPLOYMENT_NAME: {azure_deployment}")
-    print(f"OPENAI_API_KEY: {'SET (len=' + str(len(openai_key)) + ')' if openai_key else 'NOT SET'}")
     print("=" * 60)
     
     if azure_key and azure_endpoint:
-        # Use Azure OpenAI
-        print("✅ Selected: Azure OpenAI")
-        return {
-            "provider": "azure",
-            "model": f"azure/{azure_deployment}",
-            "api_key": azure_key,
-            "api_base": azure_endpoint,
-            "api_version": azure_api_version,
-        }
-    elif openai_key:
-        # Use OpenAI
-        print("✅ Selected: OpenAI")
-        return {
-            "provider": "openai",
-            "model": "gpt-4o-mini",
-            "api_key": openai_key,
-        }
+        # Initialize Azure OpenAI client
+        print("✅ Initializing Azure OpenAI client")
+        try:
+            client = AzureOpenAI(
+                api_key=azure_key,
+                api_version=azure_api_version,
+                azure_endpoint=azure_endpoint
+            )
+            print(f"✅ Azure OpenAI client initialized successfully")
+            print(f"   Endpoint: {azure_endpoint}")
+            print(f"   Deployment: {azure_deployment}")
+            return client, azure_deployment, "azure"
+        except Exception as e:
+            print(f"❌ Failed to initialize Azure OpenAI client: {e}")
+            return None, None, "none"
     else:
         # No credentials available
-        print("❌ No LLM credentials found!")
-        print("   Please set either:")
-        print("   - OPENAI_API_KEY, OR")
-        print("   - AZURE_OPENAI_KEY + AZURE_OPENAI_ENDPOINT")
-        return {
-            "provider": "none",
-            "error": "No LLM credentials configured. Set OPENAI_API_KEY or AZURE_OPENAI_KEY + AZURE_OPENAI_ENDPOINT"
-        }
+        print("❌ No Azure OpenAI credentials found!")
+        print("   Please set:")
+        print("   - AZURE_OPENAI_KEY")
+        print("   - AZURE_OPENAI_ENDPOINT")
+        return None, None, "none"
 
-# Initialize LLM config at startup
-LLM_CONFIG = get_llm_config()
-print(f"🤖 LLM Provider: {LLM_CONFIG.get('provider', 'unknown')}")
-if LLM_CONFIG["provider"] == "azure":
-    print(f"   Model: {LLM_CONFIG['model']}")
-    print(f"   Endpoint: {LLM_CONFIG['api_base']}")
-    print(f"   API Version: {LLM_CONFIG['api_version']}")
-elif LLM_CONFIG["provider"] == "openai":
-    print(f"   Model: {LLM_CONFIG['model']}")
+# Initialize LLM client at startup
+AZURE_CLIENT, AZURE_DEPLOYMENT, LLM_PROVIDER = get_llm_config()
+
+print(f"🤖 LLM Provider: {LLM_PROVIDER}")
+if LLM_PROVIDER == "azure":
+    print(f"   Deployment: {AZURE_DEPLOYMENT}")
+    print(f"   Ready to serve requests")
 else:
-    print(f"   ⚠️  {LLM_CONFIG.get('error', 'Unknown error')}")
+    print(f"   ⚠️  No LLM configured - API will return 503")
 
 # Instrument FastAPI with OpenTelemetry
 if OTEL_ENABLED and tracer:
@@ -256,7 +245,7 @@ async def chat_completions(request: ChatCompletionRequest):
             )
 
         # Check if LLM is configured
-        if LLM_CONFIG["provider"] == "none":
+        if LLM_PROVIDER == "none" or not AZURE_CLIENT:
             if current_span:
                 current_span.set_attribute("error", "LLM not configured")
             if mlflow_run:
@@ -265,38 +254,19 @@ async def chat_completions(request: ChatCompletionRequest):
                 status_code=503,
                 content={
                     "error": "LLM not configured",
-                    "message": LLM_CONFIG.get("error", "No LLM credentials available")
+                    "message": "No Azure OpenAI credentials available. Please configure AZURE_OPENAI_KEY and AZURE_OPENAI_ENDPOINT."
                 }
             )
 
-        # Call LLM with appropriate configuration
-        llm_params = {
-            "model": LLM_CONFIG["model"],
-            "messages": [{"role": "user", "content": rendered}],
-            "temperature": 0.3,
-            "max_tokens": 512,
-            "api_key": LLM_CONFIG["api_key"],
-        }
-        
-        # Add Azure-specific parameters if using Azure
-        if LLM_CONFIG["provider"] == "azure":
-            llm_params["api_base"] = LLM_CONFIG["api_base"]
-            llm_params["api_version"] = LLM_CONFIG["api_version"]
-        
         # Log parameters to MLflow
         if mlflow_run:
             # Log LLM parameters
-            mlflow.log_param("provider", LLM_CONFIG["provider"])
-            mlflow.log_param("model", LLM_CONFIG["model"])
-            mlflow.log_param("temperature", llm_params["temperature"])
-            mlflow.log_param("max_tokens", llm_params["max_tokens"])
+            mlflow.log_param("provider", "azure")
+            mlflow.log_param("model", AZURE_DEPLOYMENT)
+            mlflow.log_param("temperature", 0.3)
+            mlflow.log_param("max_tokens", 512)
             mlflow.log_param("department", dept)
             mlflow.log_param("cache_hit", False)
-            
-            # Log Azure-specific params
-            if LLM_CONFIG["provider"] == "azure":
-                mlflow.log_param("api_version", llm_params["api_version"])
-                mlflow.log_param("api_base", llm_params["api_base"])
             
             # Log prompt template (non-blocking)
             try:
@@ -314,11 +284,17 @@ async def chat_completions(request: ChatCompletionRequest):
         llm_start = datetime.now()
         with tracer.start_as_current_span("llm_completion") if tracer else nullcontext() as llm_span:
             if llm_span:
-                llm_span.set_attribute("llm.provider", LLM_CONFIG["provider"])
-                llm_span.set_attribute("llm.model", LLM_CONFIG["model"])
-                llm_span.set_attribute("llm.temperature", llm_params["temperature"])
+                llm_span.set_attribute("llm.provider", "azure")
+                llm_span.set_attribute("llm.model", AZURE_DEPLOYMENT)
+                llm_span.set_attribute("llm.temperature", 0.3)
             
-            response = litellm.completion(**llm_params)
+            # Use native Azure OpenAI client
+            response = AZURE_CLIENT.chat.completions.create(
+                model=AZURE_DEPLOYMENT,
+                messages=[{"role": "user", "content": rendered}],
+                temperature=0.3,
+                max_tokens=512
+            )
         
         llm_duration = (datetime.now() - llm_start).total_seconds()
 
@@ -339,12 +315,16 @@ async def chat_completions(request: ChatCompletionRequest):
                 print(f"⚠️  Failed to log response artifact: {e}")
 
         resp_payload = {
-            "id": "chatcmpl-xyz",
+            "id": response.id,
             "object": "chat.completion",
-            "created": int(datetime.now().timestamp()),
-            "model": LLM_CONFIG["model"],
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": answer}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 200, "completion_tokens": 100, "total_tokens": 300}
+            "created": response.created,
+            "model": response.model,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": answer}, "finish_reason": response.choices[0].finish_reason}],
+            "usage": {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens
+            }
         }
 
         r.setex(cache_key, 3600, json.dumps(resp_payload))

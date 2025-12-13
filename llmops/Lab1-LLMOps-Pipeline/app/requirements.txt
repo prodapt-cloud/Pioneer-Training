@@ -2,7 +2,7 @@ fastapi
 uvicorn
 pydantic
 jinja2
-litellm
+openai
 redis
 mlflow
 opentelemetry-api
@@ -10,3 +10,7 @@ opentelemetry-sdk
 opentelemetry-instrumentation-fastapi
 opentelemetry-exporter-otlp
 google-cloud-storage
+ragas
+datasets
+langchain-openai
+pandas

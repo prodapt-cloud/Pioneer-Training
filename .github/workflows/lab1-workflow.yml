@@ -199,6 +199,15 @@ jobs:
         if: steps.run_tests.outcome == 'failure'
         run: exit 1
 
+      # 13. Run Ragas Evaluations (after successful tests)
+      - name: Run Ragas Evaluations
+        if: steps.run_tests.outcome == 'success'
+        run: |
+          echo "=== Running Ragas Evaluations inside Pod ==="
+          POD_NAME=$(kubectl get pods -l app=llmops-api -o jsonpath='{.items[0].metadata.name}')
+          # Execute the evaluation script inside the pod
+          kubectl exec $POD_NAME -- python app/eval_ragas.py
+
       # 10. Optional: Deploy to Oracle Cloud Free Tier OKE (uncomment if you have OCI)
       # - name: Deploy to Oracle OKE (Free Forever)
       #   if: false
