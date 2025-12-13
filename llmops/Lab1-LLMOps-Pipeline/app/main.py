@@ -14,7 +14,7 @@ import mlflow
 
 # OpenTelemetry imports
 from opentelemetry import trace
-from phoenix.trace.otel import register
+from phoenix.otel import register
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from openinference.instrumentation.openai import OpenAIInstrumentor
 

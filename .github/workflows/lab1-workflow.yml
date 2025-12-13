@@ -142,9 +142,7 @@ jobs:
           kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_KEY: ${AZURE_OPENAI_KEY:+SET}" || echo "AZURE_OPENAI_KEY: NOT SET"'
           kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT}" -- || echo "AZURE_OPENAI_ENDPOINT: NOT SET"'
           kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_ENDPOINT LENGTH: ${#AZURE_OPENAI_ENDPOINT}" '
-
-          echo "=== Pod Startup Logs ==="
-          kubectl logs $POD_NAME --tail=300 | grep -E "(LLM|MLflow|OpenTelemetry|Provider|AZURE)" || true
+          kubectl exec $POD_NAME -- sh -c 'curl -v https://sivas-m76dvpr6-eastus2.openai.azure.com'
       
       # 9. Debug deployment if it fails
       - name: Debug deployment on failure
