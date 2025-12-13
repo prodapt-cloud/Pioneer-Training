@@ -19,6 +19,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.sdk.resources import Resource
+from openinference.instrumentation.openai import OpenAIInstrumentor
 
 # Initialize OpenTelemetry
 OTEL_ENABLED = os.getenv("OTEL_ENABLED", "true").lower() == "true"
@@ -40,7 +41,10 @@ if OTEL_ENABLED:
         
         trace.set_tracer_provider(provider)
         tracer = trace.get_tracer(__name__)
-        print(f"✅ OpenTelemetry tracing enabled")
+        
+        # Auto-instrument OpenAI client for Phoenix
+        OpenAIInstrumentor().instrument()
+        print(f"✅ OpenTelemetry tracing enabled (Phoenix/OTLP)")
     except Exception as e:
         print(f"⚠️  OpenTelemetry initialization failed: {e}")
         OTEL_ENABLED = False

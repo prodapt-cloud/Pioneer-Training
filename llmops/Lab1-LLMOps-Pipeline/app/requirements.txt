@@ -10,3 +10,5 @@ opentelemetry-sdk
 opentelemetry-instrumentation-fastapi
 opentelemetry-exporter-otlp
 google-cloud-storage
+arize-phoenix
+openinference-instrumentation-openai
