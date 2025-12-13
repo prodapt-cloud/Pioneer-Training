@@ -47,8 +47,12 @@ spec:
         - name: AZURE_OPENAI_DEPLOYMENT_NAME
           value: "gpt-4.1-mini"
         - name: MLFLOW_TRACKING_URI
-          value: "http://34.71.60.197:5000"
+          value: "http://34.121.225.52:5000"
         - name: MLFLOW_ENABLED
+          value: "true"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://34.121.225.52:4317"
+        - name: OTEL_ENABLED
           value: "true"
         - name: GROQ_API_KEY
           valueFrom:

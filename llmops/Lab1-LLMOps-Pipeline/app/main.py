@@ -87,6 +87,8 @@ MLFLOW_ENABLED = os.getenv("MLFLOW_ENABLED", "true").lower() == "true"
 
 if MLFLOW_ENABLED:
     try:
+        # Check connection first by setting URI
+        os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = "5" # Fail fast (5s) if server is down
         mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
         
         # Set local artifact storage to avoid GCS anonymous credentials error
