@@ -128,11 +128,13 @@ def run_evaluation():
         mlflow.set_experiment("llmops-ragas-evals")
         
         with mlflow.start_run(run_name=f"eval-{int(time.time())}"):
-            # Log aggregate metrics
-            mlflow.log_metrics(dict(scores))
+            # Log aggregate metrics via Pandas mean
+            # (EvaluationResult not directly dict-convertible in this version)
+            df_scores = scores.to_pandas()
+            metrics = df_scores.select_dtypes(include="number").mean().to_dict()
+            mlflow.log_metrics(metrics)
             
             # Log evaluation dataset as artifact
-            df_scores = scores.to_pandas()
             csv_path = "eval_results.csv"
             df_scores.to_csv(csv_path, index=False)
             mlflow.log_artifact(csv_path)

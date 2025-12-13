@@ -58,8 +58,8 @@ jobs:
       # 7. Port-forward for testing
       - name: Expose service
         run: |
-          kubectl port-forward svc/llmops-service 8080:80 --address 0.0.0.0 &
-          echo "API running at http://localhost:8080"
+          kubectl port-forward svc/llmops-service 8000:8000 --address 0.0.0.0 &
+          echo "API running at http://localhost:8000"
 
       # 8. Run integration tests
       - name: Test endpoint
@@ -78,5 +78,5 @@ jobs:
       - name: Success
         run: |
           echo "LLMOps API deployed successfully!"
-          echo "Access at: http://localhost:8080/v1/chat/completions"
+          echo "Access at: http://localhost:8000/v1/chat/completions"
           echo "Live in GitHub Codespaces: https://github.com/codespaces"

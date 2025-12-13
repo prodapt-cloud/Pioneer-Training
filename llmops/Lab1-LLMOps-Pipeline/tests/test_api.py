@@ -4,8 +4,8 @@ import pytest
 
 import os
 
-# Base URL for API (default to localhost:8080 for CI port-forward)
-BASE_URL = os.getenv("API_URL", "http://localhost:8080")
+# Base URL for API (default to localhost:8000)
+BASE_URL = os.getenv("API_URL", "http://localhost:8000")
 
 def test_health_endpoint():
     """Test that the API is running and healthy"""
