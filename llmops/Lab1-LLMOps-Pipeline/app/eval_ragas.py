@@ -5,7 +5,7 @@ import pandas as pd
 import mlflow
 from datasets import Dataset
 from ragas import evaluate
-from ragas.metrics import faithfulness, answer_relevance
+from ragas.metrics import faithfulness, answer_relevancy
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 
 # Configuration
@@ -28,18 +28,21 @@ if not (azure_endpoint and azure_key):
 azure_llm = AzureChatOpenAI(
     deployment_name=azure_deployment,
     model_name=azure_deployment,
-    openai_api_base=azure_endpoint,
+    azure_endpoint=azure_endpoint,
     openai_api_version=api_version,
     openai_api_key=azure_key
 )
 
-azure_embeddings = AzureOpenAIEmbeddings(
-    deployment=azure_deployment, # Often requires an embedding model deployment. Using same for demo if supported, or should be 'text-embedding-ada-002'
-    model=azure_deployment,
-    azure_endpoint=azure_endpoint,
-    openai_api_key=azure_key,
-    openai_api_version=api_version
-)
+from langchain_huggingface import HuggingFaceEmbeddings
+from ragas.embeddings import LangchainEmbeddingsWrapper
+
+# ... (API Keys setup remains for LLM)
+
+# Initialize Local Embeddings (Cost-free)
+# Using all-MiniLM-L6-v2 which is standard for lightweight eval
+print("📥 Loading local embeddings (all-MiniLM-L6-v2)...")
+hf_embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+azure_embeddings = LangchainEmbeddingsWrapper(hf_embeddings)
 
 # Sample Data (Questions and Ground Truths context would ideally be retrieved)
 eval_data = [
@@ -109,7 +112,7 @@ def run_evaluation():
     try:
         scores = evaluate(
             dataset,
-            metrics=[faithfulness, answer_relevance],
+            metrics=[faithfulness, answer_relevancy],
             llm=azure_llm,
             embeddings=azure_embeddings
         )
@@ -126,7 +129,7 @@ def run_evaluation():
         
         with mlflow.start_run(run_name=f"eval-{int(time.time())}"):
             # Log aggregate metrics
-            mlflow.log_metrics(scores)
+            mlflow.log_metrics(dict(scores))
             
             # Log evaluation dataset as artifact
             df_scores = scores.to_pandas()

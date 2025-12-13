@@ -1,0 +1,165 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eval-scripts
+data:
+  requirements-eval.txt: |
+    ragas
+    datasets
+    langchain-openai
+    pandas
+    python-dotenv
+    sentence-transformers
+    langchain-huggingface
+    langchain-community
+  eval_ragas.py: |
+    import os
+    import time
+    import requests
+    import pandas as pd
+    import mlflow
+    from datasets import Dataset
+    from ragas import evaluate
+    from ragas.metrics import faithfulness, answer_relevancy
+    from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
+    from langchain_huggingface import HuggingFaceEmbeddings
+    from ragas.embeddings import LangchainEmbeddingsWrapper
+
+    # Configuration
+    # Use the K8s service DNS since we are inside the cluster
+    API_URL = os.getenv("API_URL", "http://llmops-api:8000/v1/chat/completions")
+    MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://llmops-api:5000")
+
+    # Azure Config for Ragas (Judges)
+    azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o-mini")
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    azure_key = os.getenv("AZURE_OPENAI_KEY")
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+
+    if not (azure_endpoint and azure_key):
+        print("❌ Azure credentials not found.")
+        exit(1)
+
+    print(f"🔌 Connecting to API: {API_URL}")
+
+    azure_llm = AzureChatOpenAI(
+        deployment_name=azure_deployment,
+        model_name=azure_deployment,
+        azure_endpoint=azure_endpoint,
+        openai_api_version=api_version,
+        openai_api_key=azure_key
+    )
+
+    # Initialize Local Embeddings (Cost-free)
+    # Using all-MiniLM-L6-v2 which is standard for lightweight eval
+    print("📥 Loading local embeddings (all-MiniLM-L6-v2)...")
+    hf_embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    azure_embeddings = LangchainEmbeddingsWrapper(hf_embeddings)
+
+    # Sample Data
+    eval_data = [
+        {
+            "question": "What is the capital of France?",
+            "contexts": ["Paris is the capital and most populous city of France."],
+            "ground_truth": "Paris"
+        },
+        {
+            "question": "What does LLMOps stand for?",
+            "contexts": ["LLMOps stands for Large Language Model Operations."],
+            "ground_truth": "Large Language Model Operations"
+        }
+    ]
+
+    def generate_answers(data):
+        results = []
+        print(f"Generating answers for {len(data)} questions...")
+        
+        for item in data:
+            try:
+                payload = {
+                    "messages": [{"role": "user", "content": f"Context: {item['contexts'][0]}\n\nQuestion: {item['question']}"}],
+                    "metadata": {"department": "eval-ragas"}
+                }
+                response = requests.post(API_URL, json=payload, timeout=30)
+                if response.status_code == 200:
+                    answer = response.json()["choices"][0]["message"]["content"]
+                    results.append({
+                        "question": item["question"],
+                        "answer": answer,
+                        "contexts": item["contexts"],
+                        "ground_truth": item["ground_truth"]
+                    })
+                else:
+                    print(f"Error: {response.status_code} - {response.text}")
+            except Exception as e:
+                print(f"Exception: {e}")
+                
+        return results
+
+    def run_evaluation():
+        print("🚀 Starting Ragas Evaluation...")
+        results = generate_answers(eval_data)
+        
+        if not results:
+            print("❌ No results generated.")
+            exit(1)
+
+        dataset = Dataset.from_pandas(pd.DataFrame(results))
+        
+        print("🧠 Running Ragas metrics...")
+        try:
+            scores = evaluate(
+                dataset,
+                metrics=[faithfulness, answer_relevancy],
+                llm=azure_llm,
+                embeddings=azure_embeddings
+            )
+            print(f"📊 Evaluation Scores: {scores}")
+        except Exception as e:
+            print(f"❌ Ragas evaluation failed: {e}")
+            exit(1)
+
+    if __name__ == "__main__":
+        run_evaluation()
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: llmops-eval-job
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      containers:
+      - name: eval-runner
+        image: python:3.11-slim
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          echo "📦 Installing evaluation dependencies..."
+          pip install --no-cache-dir -r /app/requirements-eval.txt > /dev/null
+          echo "🚀 Running evaluation script..."
+          python /app/eval_ragas.py
+        env:
+        - name: API_URL
+          value: "http://llmops-api:8000/v1/chat/completions"
+        - name: AZURE_OPENAI_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llmops-api-keys
+              key: AZURE_OPENAI_KEY
+        - name: AZURE_OPENAI_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: llmops-api-keys
+              key: AZURE_OPENAI_ENDPOINT
+        volumeMounts:
+        - name: eval-scripts
+          mountPath: /app
+      restartPolicy: Never
+      volumes:
+      - name: eval-scripts
+        configMap:
+          name: eval-scripts

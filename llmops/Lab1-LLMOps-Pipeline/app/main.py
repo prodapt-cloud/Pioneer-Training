@@ -51,8 +51,30 @@ else:
 
 
 # === CONFIG ===
-r = redis.Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, db=0, decode_responses=True)
-PROMPT_PATH = "/app/prompt/assistant_v1_openai.jinja2"  # OpenAI-compatible prompt
+REDIS_ENABLED = os.getenv("REDIS_ENABLED", "true").lower() == "true"
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+
+class MockRedis:
+    def get(self, key): return None
+    def setex(self, key, time, value): pass
+    def ping(self): return True
+
+if REDIS_ENABLED:
+    try:
+        r = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
+        r.ping() # Fail fast if not reachable
+        print(f"✅ Redis connected: {REDIS_HOST}")
+    except Exception as e:
+        print(f"⚠️  Redis connection failed: {e}")
+        print("   Caching disabled")
+        r = MockRedis()
+else:
+    print("ℹ️  Redis disabled (REDIS_ENABLED=false)")
+    r = MockRedis()
+
+# Use relative path for prompts to ensure it works in both container and local env
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROMPT_PATH = os.path.join(BASE_DIR, "prompt", "assistant_v1_openai.jinja2")
 
 # Load prompt template
 with open(PROMPT_PATH) as f:
@@ -173,12 +195,12 @@ async def health_check():
         health_data = {
             "status": "healthy",
             "redis": "connected",
-            "llm_provider": LLM_CONFIG.get("provider", "unknown"),
+            "llm_provider": LLM_PROVIDER,
         }
         
         # Add LLM model info if configured
-        if LLM_CONFIG["provider"] != "none":
-            health_data["llm_model"] = LLM_CONFIG.get("model", "unknown")
+        if LLM_PROVIDER != "none":
+            health_data["llm_model"] = AZURE_DEPLOYMENT
         
         return health_data
     except Exception as e:
@@ -331,7 +353,12 @@ async def chat_completions(request: ChatCompletionRequest):
         return JSONResponse(content=resp_payload)
     
     except Exception as e:
-        # Log error to MLflow and trace
+        # Print error for local debugging
+        print(f"❌ LLM Error: {e}")
+        import traceback
+        traceback.print_exc()
+
+        # Log error to MLflow but do NOT fail the span (let it record the error)
         if current_span:
             current_span.set_attribute("error", True)
             current_span.set_attribute("error.message", str(e))

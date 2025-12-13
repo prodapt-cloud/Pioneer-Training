@@ -2,9 +2,15 @@ import requests
 import time
 import pytest
 
+import os
+
+# Base URL for API (default to localhost:8080 for CI port-forward)
+BASE_URL = os.getenv("API_URL", "http://localhost:8080")
+
 def test_health_endpoint():
     """Test that the API is running and healthy"""
-    r = requests.get("http://localhost:8080/health")
+    print(f"Testing against: {BASE_URL}")
+    r = requests.get(f"{BASE_URL}/health")
     assert r.status_code in [200, 503]  # 503 if Redis not connected
     data = r.json()
     assert "status" in data
@@ -14,7 +20,7 @@ def test_health_endpoint():
 def test_chat_endpoint():
     """Test chat endpoint - skip if LLM not configured"""
     # First check if LLM is configured
-    health = requests.get("http://localhost:8080/health").json()
+    health = requests.get(f"{BASE_URL}/health").json()
     
     if health.get("llm_provider") == "none":
         pytest.skip("LLM not configured (no API keys set in GitHub Secrets)")
@@ -27,14 +33,15 @@ def test_chat_endpoint():
     print(f"Testing with LLM provider: {health.get('llm_provider')}")
     
     start = time.time()
-    r1 = requests.post("http://localhost:8080/v1/chat/completions", json=payload)
+    start = time.time()
+    r1 = requests.post(f"{BASE_URL}/v1/chat/completions", json=payload)
     t1 = time.time() - start
 
     # Should succeed if LLM is configured
     assert r1.status_code == 200, f"Expected 200, got {r1.status_code}: {r1.text}"
     
     start = time.time()
-    r2 = requests.post("http://localhost:8080/v1/chat/completions", json=payload)
+    r2 = requests.post(f"{BASE_URL}/v1/chat/completions", json=payload)
     t2 = time.time() - start
 
     assert r2.status_code == 200

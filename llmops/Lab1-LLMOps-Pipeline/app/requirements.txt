@@ -10,7 +10,3 @@ opentelemetry-sdk
 opentelemetry-instrumentation-fastapi
 opentelemetry-exporter-otlp
 google-cloud-storage
-ragas
-datasets
-langchain-openai
-pandas

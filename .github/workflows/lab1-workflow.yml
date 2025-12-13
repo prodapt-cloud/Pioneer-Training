@@ -199,14 +199,23 @@ jobs:
         if: steps.run_tests.outcome == 'failure'
         run: exit 1
 
-      # 13. Run Ragas Evaluations (after successful tests)
+      # 13. Run Ragas Evaluations (Separate Job)
       - name: Run Ragas Evaluations
         if: steps.run_tests.outcome == 'success'
         run: |
-          echo "=== Running Ragas Evaluations inside Pod ==="
-          POD_NAME=$(kubectl get pods -l app=llmops-api -o jsonpath='{.items[0].metadata.name}')
-          # Execute the evaluation script inside the pod
-          kubectl exec $POD_NAME -- python app/eval_ragas.py
+          echo "=== Deploying Evaluation Job ==="
+          # Delete previous job if it exists
+          kubectl delete job llmops-eval-job --ignore-not-found=true
+          kubectl delete configmap eval-scripts --ignore-not-found=true
+          
+          # Create and run the new job
+          kubectl apply -f llmops/Lab1-LLMOps-Pipeline/k8s/eval-job.yaml
+          
+          echo "Waiting for evaluation job to complete..."
+          kubectl wait --for=condition=complete job/llmops-eval-job --timeout=300s
+          
+          echo "=== Evaluation Logs ==="
+          kubectl logs job/llmops-eval-job
 
       # 10. Optional: Deploy to Oracle Cloud Free Tier OKE (uncomment if you have OCI)
       # - name: Deploy to Oracle OKE (Free Forever)
