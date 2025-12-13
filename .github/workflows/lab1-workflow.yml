@@ -140,7 +140,7 @@ jobs:
           echo "Checking if API keys are set (values masked):"
           kubectl exec $POD_NAME -- sh -c 'echo "OPENAI_API_KEY: ${OPENAI_API_KEY:+SET}" || echo "OPENAI_API_KEY: NOT SET"'
           kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_KEY: ${AZURE_OPENAI_KEY:+SET}" || echo "AZURE_OPENAI_KEY: NOT SET"'
-          kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:+SET}" || echo "AZURE_OPENAI_ENDPOINT: NOT SET"'
+          kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT}" -- || echo "AZURE_OPENAI_ENDPOINT: NOT SET"'
           kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_ENDPOINT LENGTH: ${#AZURE_OPENAI_ENDPOINT}" '
 
           echo "=== Pod Startup Logs ==="
@@ -193,7 +193,7 @@ jobs:
           echo ""
           echo "=== Pod Environment Check ==="
           kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_KEY length: ${#AZURE_OPENAI_KEY}"'
-          kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_ENDPOINT: $AZURE_OPENAI_ENDPOINT"'
+          kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_ENDPOINT: ${#AZURE_OPENAI_ENDPOINT}"'
       
       # 12c. Fail the workflow if tests failed
       - name: Check test results

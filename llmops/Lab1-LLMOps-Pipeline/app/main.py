@@ -14,36 +14,28 @@ import mlflow
 
 # OpenTelemetry imports
 from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from phoenix.trace.otel import register
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.sdk.resources import Resource
 from openinference.instrumentation.openai import OpenAIInstrumentor
 
-# Initialize OpenTelemetry
+# Initialize OpenTelemetry via Phoenix
 OTEL_ENABLED = os.getenv("OTEL_ENABLED", "true").lower() == "true"
 if OTEL_ENABLED:
     try:
-        resource = Resource(attributes={
-            "service.name": "llmops-api",
-            "service.version": "1.0.0",
-            "deployment.environment": os.getenv("ENVIRONMENT", "production")
-        })
-        
-        provider = TracerProvider(resource=resource)
-        
-        # Add OTLP exporter if endpoint is configured
-        otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-        if otlp_endpoint:
-            otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
-            provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
-        
-        trace.set_tracer_provider(provider)
-        tracer = trace.get_tracer(__name__)
+        # Register Phoenix as the tracer provider
+        # This automatically sets up the OTLP exporter to the endpoint
+        tracer_provider = register(
+            project_name="llmops-api",
+            endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+            set_global_tracer_provider=True
+        )
         
         # Auto-instrument OpenAI client for Phoenix
-        OpenAIInstrumentor().instrument()
+        OpenAIInstrumentor(tracer_provider=tracer_provider).instrument()
+        
+        trace.set_tracer_provider(tracer_provider)
+        tracer = trace.get_tracer(__name__)
+        
         print(f"✅ OpenTelemetry tracing enabled (Phoenix/OTLP)")
     except Exception as e:
         print(f"⚠️  OpenTelemetry initialization failed: {e}")
