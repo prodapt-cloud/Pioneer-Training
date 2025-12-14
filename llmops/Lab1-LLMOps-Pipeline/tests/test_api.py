@@ -26,7 +26,7 @@ def test_chat_endpoint():
         pytest.skip("LLM not configured (no API keys set in GitHub Secrets)")
     
     payload = {
-        "messages": [{"role": "user", "content": "Hello"}],
+        "messages": [{"role": "user", "content": "What is the leave policy for engineering department?"}],
         "metadata": {"department": "engineering"}
     }
     

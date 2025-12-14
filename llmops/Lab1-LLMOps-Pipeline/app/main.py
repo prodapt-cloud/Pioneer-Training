@@ -11,6 +11,7 @@ from jinja2 import Template
 from openai import AzureOpenAI
 import redis
 import mlflow
+import httpx
 
 # OpenTelemetry imports
 from opentelemetry import trace
@@ -104,6 +105,22 @@ else:
 
 app = FastAPI(title="LLMOps Production API", version="1.0.0")
 
+SENSITIVE = {"authorization", "api-key"}
+
+def log_request(request: httpx.Request):
+    safe = {}
+    for k, v in request.headers.items():
+        if k.lower() in SENSITIVE:
+            safe[k] = f"<redacted len={len(v)} repr_tail={repr(v[-10:])}>"
+        else:
+            safe[k] = f"<len={len(v)} repr={repr(v)}>"
+    print("OUTGOING HEADERS:", safe)
+
+def log_response(response: httpx.Response):
+    print("STATUS:", response.status_code)
+
+http_client = httpx.Client(event_hooks={"request": [log_request], "response": [log_response]})
+
 # === LLM CONFIGURATION ===
 def get_llm_config():
     """
@@ -132,9 +149,10 @@ def get_llm_config():
         print("✅ Initializing Azure OpenAI client")
         try:
             client = AzureOpenAI(
-                api_key=azure_key,
+                api_key=azure_key.strip(),
                 api_version=azure_api_version,
-                azure_endpoint=azure_endpoint
+                azure_endpoint=azure_endpoint.strip(),
+                http_client=http_client
             )
             print(f"✅ Azure OpenAI client initialized successfully")
             print(f"   Endpoint: {azure_endpoint}")
@@ -212,6 +230,7 @@ async def health_check():
 async def root():
     """Root endpoint"""
     return {"message": "LLMOps Production API", "version": "1.0.0"}
+
 
 
 @app.post("/v1/chat/completions")
@@ -310,14 +329,37 @@ async def chat_completions(request: ChatCompletionRequest):
                 llm_span.set_attribute("llm.temperature", 0.3)
             
             # Use native Azure OpenAI client
-            response = AZURE_CLIENT.chat.completions.create(
-                model=AZURE_DEPLOYMENT,
-                messages=[{"role": "user", "content": rendered}],
-                temperature=0.3,
-                max_tokens=512
-            )
+            response = None
+            try:
+                # az_client= AzureOpenAI(
+                #     api_key=AZURE_OPENAI_KEY,
+                #     api_base=AZURE_OPENAI_ENDPOINT,
+                #     api_version=AZURE_OPENAI_API_VERSION,
+                #     http_client=http_client
+                # )
+                # response = az_client.chat.completions.create(
+                #     model=AZURE_DEPLOYMENT,
+                #     messages=[{"role": "user", "content": rendered}],
+                #     temperature=0.3,
+                #     max_tokens=512,
+                # )
+
+                # Use native Azure OpenAI client
+                response = AZURE_CLIENT.chat.completions.create(
+                  model=AZURE_DEPLOYMENT,
+                  messages=[{"role": "user", "content": rendered}],
+                  temperature=0.3,
+                  max_tokens=512
+                )  
+
+            except Exception as e:
+                print(f"Error: {e}")
+                raise e
         
         llm_duration = (datetime.now() - llm_start).total_seconds()
+
+        if not response or not response.choices:
+            raise Exception("Received empty or invalid response from LLM provider")
 
         answer = response.choices[0].message.content
         

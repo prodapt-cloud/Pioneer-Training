@@ -1,5 +1,5 @@
 # .github/workflows/deploy-llmops.yml
-name: Deploy LLMOps Endpoint (100% Free)
+name: Deploy LLMOps Endpoint
 
 on:
   push:
@@ -190,7 +190,7 @@ jobs:
           echo ""
           echo "=== Pod Environment Check ==="
           kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_KEY length: ${#AZURE_OPENAI_KEY}"'
-          kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_ENDPOINT: ${#AZURE_OPENAI_ENDPOINT}"'
+          kubectl exec $POD_NAME -- sh -c 'echo "AZURE_OPENAI_ENDPOINT length: ${#AZURE_OPENAI_ENDPOINT}"'
       
       # 12c. Fail the workflow if tests failed
       - name: Check test results
