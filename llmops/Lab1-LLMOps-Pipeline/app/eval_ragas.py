@@ -14,10 +14,10 @@ API_URL = os.getenv("API_URL", "http://localhost:8000/v1/chat/completions")
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
 
 # Azure Config for Ragas (Judges)
-azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o-mini")
+azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1-mini")
 azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
 azure_key = os.getenv("AZURE_OPENAI_KEY")
-api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-01-01-preview")
 
 # Initialize Azure LLM/Embeddings for Ragas
 # Note: Ragas uses these to evaluate the quality of the answers
