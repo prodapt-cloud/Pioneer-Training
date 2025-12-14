@@ -12,6 +12,8 @@ data:
     sentence-transformers
     langchain-huggingface
     langchain-community
+    mlflow
+    requests
   eval_ragas.py: |
     import os
     import time
