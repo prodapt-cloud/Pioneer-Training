@@ -209,11 +209,14 @@ jobs:
           # Create and run the new job
           kubectl apply -f llmops/Lab1-LLMOps-Pipeline/k8s/eval-job.yaml
           
+          echo "Waiting for evaluation pod to start..."
+          kubectl wait --for=condition=ready pod -l job-name=llmops-eval-job --timeout=60s || true
+          
+          echo "=== Streaming Evaluation Logs ==="
+          kubectl logs -f job/llmops-eval-job &
+          
           echo "Waiting for evaluation job to complete..."
           kubectl wait --for=condition=complete job/llmops-eval-job --timeout=3600s
-          
-          echo "=== Evaluation Logs ==="
-          kubectl logs job/llmops-eval-job
 
       # 10. Optional: Deploy to Oracle Cloud Free Tier OKE (uncomment if you have OCI)
       # - name: Deploy to Oracle OKE (Free Forever)

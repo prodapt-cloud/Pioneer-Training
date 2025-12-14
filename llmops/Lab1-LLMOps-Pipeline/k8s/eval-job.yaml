@@ -155,6 +155,10 @@ spec:
             secretKeyRef:
               name: llmops-api-keys
               key: AZURE_OPENAI_ENDPOINT
+        - name: AZURE_OPENAI_API_VERSION
+          value: "2025-01-01-preview"
+        - name: AZURE_OPENAI_DEPLOYMENT_NAME
+          value: "gpt-4.1-mini"
         volumeMounts:
         - name: eval-scripts
           mountPath: /app
