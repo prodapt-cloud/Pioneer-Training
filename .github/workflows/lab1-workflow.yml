@@ -210,7 +210,7 @@ jobs:
           kubectl apply -f llmops/Lab1-LLMOps-Pipeline/k8s/eval-job.yaml
           
           echo "Waiting for evaluation job to complete..."
-          kubectl wait --for=condition=complete job/llmops-eval-job --timeout=300s
+          kubectl wait --for=condition=complete job/llmops-eval-job --timeout=3600s
           
           echo "=== Evaluation Logs ==="
           kubectl logs job/llmops-eval-job
