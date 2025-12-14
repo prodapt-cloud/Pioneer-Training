@@ -29,14 +29,14 @@ data:
 
     # Configuration
     # Use the K8s service DNS since we are inside the cluster
-    API_URL = os.getenv("API_URL", "http://llmops-api:8000/v1/chat/completions")
-    MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://llmops-api:5000")
+    API_URL = os.getenv("API_URL", "http://llmops-service:8000/v1/chat/completions")
+    MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://llmops-service:5000")
 
     # Azure Config for Ragas (Judges)
-    azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o-mini")
+    azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1-mini")
     azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
     azure_key = os.getenv("AZURE_OPENAI_KEY")
-    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2025-01-01-preview")
 
     if not (azure_endpoint and azure_key):
         print("❌ Azure credentials not found.")
@@ -69,6 +69,11 @@ data:
             "question": "What does LLMOps stand for?",
             "contexts": ["LLMOps stands for Large Language Model Operations."],
             "ground_truth": "Large Language Model Operations"
+        },
+        {
+            "question": "Explain the concept of RAG.",
+            "contexts": ["Retrieval-Augmented Generation (RAG) is the process of optimizing the output of a large language model, so it references an authoritative knowledge base outside its training data sources before generating a response."],
+            "ground_truth": "RAG (Retrieval-Augmented Generation) optimizes LLM output by referencing an external knowledge base."
         }
     ]
 
@@ -93,8 +98,10 @@ data:
                     })
                 else:
                     print(f"Error: {response.status_code} - {response.text}")
+                    exit(1) # Fail fast on API error
             except Exception as e:
                 print(f"Exception: {e}")
+                exit(1) # Fail fast on connection error
                 
         return results
 
@@ -121,6 +128,28 @@ data:
             print(f"❌ Ragas evaluation failed: {e}")
             exit(1)
 
+        # Log to MLflow
+        if MLFLOW_TRACKING_URI:
+            try:
+                print(f"📝 Logging to MLflow: {MLFLOW_TRACKING_URI}")
+                mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+                mlflow.set_experiment("llmops-ragas-evals")
+                
+                with mlflow.start_run(run_name=f"eval-{int(time.time())}"):
+                    df_scores = scores.to_pandas()
+                    metrics = df_scores.select_dtypes(include="number").mean().to_dict()
+                    mlflow.log_metrics(metrics)
+                    
+                    csv_path = "eval_results.csv"
+                    df_scores.to_csv(csv_path, index=False)
+                    mlflow.log_artifact(csv_path)
+                    
+                    mlflow.log_param("eval_count", len(results))
+                    mlflow.log_param("eval_model", azure_deployment)
+                    print(f"✅ Results logged to MLflow")
+            except Exception as e:
+                print(f"⚠️ Failed to log to MLflow: {e}")
+
     if __name__ == "__main__":
         run_evaluation()
 
@@ -146,7 +175,7 @@ spec:
           python /app/eval_ragas.py
         env:
         - name: API_URL
-          value: "http://llmops-api:8000/v1/chat/completions"
+          value: "http://llmops-service:8000/v1/chat/completions"
         - name: AZURE_OPENAI_KEY
           valueFrom:
             secretKeyRef:
@@ -161,6 +190,16 @@ spec:
           value: "2025-01-01-preview"
         - name: AZURE_OPENAI_DEPLOYMENT_NAME
           value: "gpt-4.1-mini"
+        - name: MLFLOW_TRACKING_URI
+          value: "http://136.114.23.169:5000"
+        - name: MLFLOW_ENABLED
+          value: "true"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://136.114.23.169:6006/v1/traces"
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: "http/protobuf"
+        - name: OTEL_ENABLED
+          value: "true"
         volumeMounts:
         - name: eval-scripts
           mountPath: /app
