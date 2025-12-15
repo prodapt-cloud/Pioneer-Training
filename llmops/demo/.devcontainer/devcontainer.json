@@ -1,0 +1,19 @@
+{
+    "name": "LLMOps Lab",
+    "image": "mcr.microsoft.com/devcontainers/python:3.11",
+    "features": {
+        "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
+        "ghcr.io/devcontainers/features/kubectl-helm:1": {}
+    },
+    "postCreateCommand": "pip install -r requirements.txt && kind create cluster --name llmops",
+    "forwardPorts": [
+        8080,
+        8000
+    ],
+    "portsAttributes": {
+        "8080": {
+            "label": "LLMOps API",
+            "onAutoForward": "notify"
+        }
+    }
+}
